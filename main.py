@@ -3,34 +3,41 @@ import networkx as nx
 import folium
 import os
 
-# --- 1. Налаштування ---
+# --- 1. Configuration ---
 DATA_PATH = os.path.join("data", "europe_air_routes.csv")
 MAP_OUTPUT = "flight_network_map.html"
 
 def load_data():
-    """Завантажує та очищує дані."""
-    print("✈️  Loading data...")
+    """
+    Loads and cleans the flight dataset.
+    Removes rows with missing geographical coordinates to ensure graph integrity.
+    """
+    print("✈️  Loading and preprocessing data...")
     df = pd.read_csv(DATA_PATH)
     
-    # Видаляємо рейси без координат (якщо такі є)
+    # Drop flights with missing coordinates
     df_clean = df.dropna(subset=['departure_latitude', 'departure_longitude', 
                                  'arrival_latitude', 'arrival_longitude'])
     return df_clean
 
 def build_graph(df):
-    """Створює граф польотів (Аеропорти = Вузли, Рейси = Ребра)."""
-    print("🌐 Building network graph...")
+    """
+    Constructs the Flight Network Graph.
+    - Nodes: Airports (with city and coordinate attributes).
+    - Edges: Flight routes (weighted by flight duration).
+    """
+    print("🌐 Building network graph from data...")
     G = nx.Graph()
     
     for _, row in df.iterrows():
-        # Додаємо маршрут (ребро)
+        # Add edge (Route)
         G.add_edge(
             row['iata_from'], 
             row['iata_to'], 
-            weight=row['common_duration'] # Вага = тривалість польоту
+            weight=row['common_duration'] # Weight = Flight duration in minutes
         )
         
-        # Додаємо координати аеропортів (атрибути вузла)
+        # Add node attributes (Coordinates & City Name)
         G.nodes[row['iata_from']]['pos'] = (row['departure_latitude'], row['departure_longitude'])
         G.nodes[row['iata_from']]['city'] = row['departure_city']
         
@@ -40,7 +47,10 @@ def build_graph(df):
     return G
 
 def find_top_hubs(G, n=5):
-    """Знаходить топ аеропортів за кількістю сполучень (Degree Centrality)."""
+    """
+    Identifies the busiest airports using Degree Centrality.
+    Returns the top N hubs with the most direct connections.
+    """
     degree_dict = dict(G.degree(G.nodes()))
     sorted_degree = sorted(degree_dict.items(), key=lambda item: item[1], reverse=True)
     
@@ -50,7 +60,10 @@ def find_top_hubs(G, n=5):
         print(f"{i}. {airport} ({city}) - {degree} connections")
 
 def find_shortest_path(G, start_code, end_code):
-    """Знаходить оптимальний маршрут між двома містами (Dijkstra algorithm)."""
+    """
+    Calculates the optimal route between two cities using Dijkstra's algorithm.
+    It finds the path with the minimum total weight (duration).
+    """
     try:
         path = nx.shortest_path(G, source=start_code, target=end_code, weight='weight')
         print(f"\n📍 OPTIMAL ROUTE ({start_code} -> {end_code}):")
@@ -61,13 +74,16 @@ def find_shortest_path(G, start_code, end_code):
         return None
 
 def visualize_map(G, df):
-    """Створює інтерактивну карту (відображає тільки Топ-100 маршрутів для швидкості)."""
+    """
+    Generates an interactive HTML map using Folium.
+    Visualizes major hubs and flight paths.
+    """
     print(f"\n🗺️  Generating interactive map ({MAP_OUTPUT})...")
     
-    # Центр карти - десь у Європі (Мюнхен)
+    # Center map on Europe (approx. Munich coordinates)
     m = folium.Map(location=[48.1351, 11.5820], zoom_start=4, tiles="CartoDB dark_matter")
 
-    # Малюємо хаби (топ 50)
+    # Visualize Top 50 Hubs
     degree_dict = dict(G.degree(G.nodes()))
     top_nodes = sorted(degree_dict.items(), key=lambda item: item[1], reverse=True)[:50]
     
@@ -76,17 +92,17 @@ def visualize_map(G, df):
             lat, lon = G.nodes[airport]['pos']
             city = G.nodes[airport].get('city', airport)
             
+            # Marker size depends on the number of connections
             folium.CircleMarker(
                 location=[lat, lon],
-                radius=count / 10, # Розмір залежить від кількості рейсів
+                radius=count / 10, 
                 color="#3498db",
                 fill=True,
                 fill_color="#3498db",
                 popup=f"{city} ({airport}): {count} routes"
             ).add_to(m)
 
-    # Малюємо топ маршрути (щоб карта не висла)
-    # Беремо перші 200 маршрутів з файлу для прикладу
+    # Visualize first 200 Routes (to maintain performance)
     for _, row in df.head(200).iterrows():
         start_pos = (row['departure_latitude'], row['departure_longitude'])
         end_pos = (row['arrival_latitude'], row['arrival_longitude'])
@@ -99,16 +115,15 @@ def visualize_map(G, df):
         ).add_to(m)
 
     m.save(MAP_OUTPUT)
-    print("✅ Map saved! Open 'flight_network_map.html' in your browser.")
+    print(f"✅ Map saved successfully! Open '{MAP_OUTPUT}' in your browser.")
 
-# --- Головний запуск ---
+# --- Main Execution Flow ---
 if __name__ == "__main__":
+    # Step 1: Load Data
     df = load_data()
+    
+    # Step 2: Build Graph
     flight_graph = build_graph(df)
     
+    # Step 3: Analyze Network
     find_top_hubs(flight_graph)
-    
-    # Тест маршруту: Спробуємо долетіти з Шеннона (Ірландія) в Афіни
-    find_shortest_path(flight_graph, 'SNN', 'ATH')
-    
-    visualize_map(flight_graph, df)
